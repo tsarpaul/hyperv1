@@ -1,4 +1,5 @@
-obj-m += entry.o
+obj-m := hyperko.o 
+hyperko-objs := vmx.o hyper.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

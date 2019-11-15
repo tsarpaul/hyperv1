@@ -1,11 +1,9 @@
-#include "entry.h"
-#include "linux/device.h"
-#include "linux/fs.h"
+#include "hyper.h"
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("hyper1 kernel module");
 
-static dev_t devt; // Our only device number
+static dev_t devt = 0; // Our only device number
 static struct cdev *cdev;
 static struct class *cls;
 static struct device *dev;
@@ -26,30 +24,28 @@ static void cleanup(void){
 		class_destroy(cls);
 	if(cdev_added)
 		cdev_del(cdev);
-	unregister_chrdev_region(devt, DEVICE_COUNT); 
+	if(devt != 0)
+		unregister_chrdev_region(devt, DEVICE_COUNT); 
 }
 
-static void enable_vmx_operation(void){
-	__write_cr4(__read_cr4() | 0x2000);
+static int check_vmx_support(void){
+	int ecx = cpuid_ecx(1);
+	int lo = 0;
+	int hi = 0;
+	if ((ecx&(1<<5)) == 0) {
+		printk(KERN_ALERT "CPU does not support VMX operations");
+		return -1;
+	}
+	rdmsr_safe(MSR_IA32_FEATURE_CONTROL, &lo, &hi);
+	if((lo & 0b100) == 0) {
+		printk(KERN_ALERT "Please turn on virtualization support in BIOS");
+		return -1;
+	}
+	return 0;
 }
 
-static void disable_vmx_operation(void){
-	__write_cr4(__read_cr4() & ~(0x2000));
-}
-
-static void smp_enable_vmx_operation(void *info) {
-	enable_vmx_operation();
-}
-
-static void smp_disable_vmx_operation(void *info) {
-	disable_vmx_operation();
-}
-
-static int __init hyper_init(void) {
+static int setup_chrdev(void){
 	int err;
-
-	printk(KERN_INFO "Hyper1 Init!\n");
-	
 	// Obtain available device number (devt)
 	if((err = alloc_chrdev_region(&devt, 0 , DEVICE_COUNT, DEVICE_NAME))){
 		printk(KERN_ALERT "alloc_chrdev_region() failed");
@@ -58,13 +54,11 @@ static int __init hyper_init(void) {
 
 	// Create chrdev and register with the system
         if((cdev = cdev_alloc()) == NULL){
-                cleanup();
                 printk(KERN_ALERT "cdev_alloc() failed");
                 return -1;
         } 
         cdev->ops = &fops;
         if(cdev_add(cdev, devt, 1) == -1){
-                cleanup();
                 printk(KERN_ALERT "cdev_add() failed");
                 return -1;
         }
@@ -72,14 +66,28 @@ static int __init hyper_init(void) {
 	
 	// Register chrdev with sysfs for udevd to create our device file
 	if((cls = class_create(THIS_MODULE, DEVICE_NAME)) == NULL){
-		cleanup();
 		printk(KERN_ALERT "class_create() failed");
 		return -1;	
 	} 
 	if((dev = device_create(cls, NULL, devt, NULL, DEVICE_NAME)) == NULL){
-		cleanup();
 		printk(KERN_ALERT "device_create() failed");
 		return -1;
+	}
+
+	return 0;
+}
+
+static int __init hyper_init(void) {
+	int err;
+
+	printk(KERN_INFO "Hyper1 Init!\n");
+	if(check_vmx_support()){
+		cleanup();
+		return -1;
+	}
+	if((err = setup_chrdev())){
+		cleanup();
+		return err;
 	}
 	
 	printk(KERN_INFO "Assigned major number %d\n", MAJOR(devt));
@@ -92,17 +100,18 @@ static void __exit hyper_exit(void) {
 } 
 
 static int hyper_dev_open(struct inode* inode, struct file *filep){
-	printk(KERN_INFO "Enabling VMX operation!\n");
-	on_each_cpu(smp_enable_vmx_operation, NULL, 1);
+	int err;
+	printk(KERN_INFO "Hyper device opened!\n");
+	if((err = vmx_setup()))
+		return err;
 	return 0;
 }
 
 static int hyper_dev_release(struct inode* inode, struct file *filep){
-	printk(KERN_INFO "Disabling VMX operation!\n");
-	on_each_cpu(smp_disable_vmx_operation, NULL, 1);
+	printk(KERN_INFO "Hyper device released!\n");
+	vmx_teardown();
 	return 0;
 }
-
 
 module_init(hyper_init);
 module_exit(hyper_exit);

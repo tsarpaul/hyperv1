@@ -6,6 +6,10 @@
 #include "linux/cdev.h"
 #include "linux/device.h"
 #include "asm/special_insns.h"
+#include "asm/io.h"
+#include "asm/msr.h"
+
+#include "vmx.h"
 
 #define DEVICE_NAME "hyper1"
 #define DEVICE_COUNT 1
