@@ -17,7 +17,7 @@ static struct file_operations fops = {
 	.write = NULL
 };
 
-static void cleanup(void){
+static void device_cleanup(void){
 	if(dev != NULL)
 		device_destroy(cls, devt);
 	if(cls != NULL)
@@ -82,11 +82,15 @@ static int __init hyper_init(void) {
 
 	printk(KERN_INFO "Hyper1 Init!\n");
 	if(check_vmx_support()){
-		cleanup();
+		device_cleanup();
 		return -1;
 	}
 	if((err = setup_chrdev())){
-		cleanup();
+		device_cleanup();
+		return err;
+	}
+	if((err = vmx_setup())){
+		device_cleanup();
 		return err;
 	}
 	
@@ -95,21 +99,19 @@ static int __init hyper_init(void) {
 }
 
 static void __exit hyper_exit(void) {
-	cleanup();
+	vmx_teardown();
+	device_cleanup();
 	printk(KERN_INFO "Hyper1 Exit!\n");
 } 
 
 static int hyper_dev_open(struct inode* inode, struct file *filep){
-	int err;
 	printk(KERN_INFO "Hyper device opened!\n");
-	if((err = vmx_setup()))
-		return err;
+	vmx_launch();
 	return 0;
 }
 
 static int hyper_dev_release(struct inode* inode, struct file *filep){
 	printk(KERN_INFO "Hyper device released!\n");
-	vmx_teardown();
 	return 0;
 }
 
