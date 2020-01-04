@@ -80,6 +80,7 @@ static int setup_chrdev(void){
 static int __init hyper_init(void) {
 	int err;
 
+	get_cpu();
 	printk(KERN_INFO "Hyper1 Init!\n");
 	if(check_vmx_support()){
 		device_cleanup();
@@ -95,6 +96,8 @@ static int __init hyper_init(void) {
 	}
 	
 	printk(KERN_INFO "Assigned major number %d\n", MAJOR(devt));
+	vmx_launch();
+	put_cpu();
 	return 0;
 }
 
